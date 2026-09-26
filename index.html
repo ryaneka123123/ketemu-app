@@ -50,6 +50,14 @@ textarea{min-height:70px;resize:vertical}
 .item-detail img{width:110px;height:110px;object-fit:cover;border-radius:8px}
 .pick{border:2px solid transparent}
 .pick.sel{border-color:var(--accent)}
+.disclaimer{background:#fef9e7;border-bottom:1px solid #fde68a;color:#92400e;font-size:.8rem;padding:8px 20px;text-align:center}
+.spec-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.video-link{display:inline-flex;align-items:center;gap:6px;color:var(--accent);text-decoration:none;font-size:.85rem;margin-top:6px}
+.faq{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:var(--card)}
+.faq b{color:var(--navy)}
+.ticket{border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--card)}
+.ticket .status-open{color:var(--warn)}
+.ticket .status-resolved{color:var(--ok)}
 #loginScreen{max-width:380px;margin:80px auto;text-align:center;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:32px}
 #loginScreen h1{color:var(--navy);margin-bottom:8px}
 </style>
@@ -72,6 +80,7 @@ textarea{min-height:70px;resize:vertical}
   <nav id="nav"></nav>
   <div id="userbox" style="display:flex;align-items:center;gap:10px"></div>
 </header>
+<div class="disclaimer">⚠️ KETEMU adalah fasilitator lost & found kampus. Kami (pihak kedua) tidak bertanggung jawab penuh atas kondisi, kerusakan, atau kehilangan barang setelah diserahkan. Video kondisi awal barang saat ditemukan/diserahkan wajib dilampirkan sebagai bukti perlindungan kedua belah pihak.</div>
 <main id="app"><div class="empty">Memuat...</div></main>
 </div>
 
@@ -96,7 +105,7 @@ const firebaseConfig = {
 /* =========================================================
    2) DAFTAR EMAIL ADMIN (bisa lebih dari satu, pisahkan koma)
    ========================================================= */
-const ADMIN_EMAILS = ["danuarta121212@gmail.com"];
+const ADMIN_EMAILS = ["danuarta121212@gmail.com", "ryan.eka.2504316@students.um.ac.id"];
 
 /* ========================================================= */
 
@@ -104,7 +113,7 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const dbf = firebase.firestore();
 
-let me=null, isAdmin=false, items=[], claims=[];
+let me=null, isAdmin=false, items=[], claims=[], tickets=[];
 const cat_opt=['Aksesoris','Elektronik','Kartu Identitas','Pakaian','Lainnya'];
 
 function signIn(){
@@ -142,11 +151,15 @@ function startListeners(){
     claims = snap.docs.map(d=>({id:d.id,...d.data()}));
     render();
   });
+  dbf.collection('helpdesk').onSnapshot(snap=>{
+    tickets = snap.docs.map(d=>({id:d.id,...d.data()}));
+    render();
+  });
 }
 
 function nav(route){ location.hash=route; }
 function renderNav(){
-  const routes=[['#/beranda','Beranda'],['#/daftar','Daftar Barang'],['#/lapor','Laporkan Barang'],['#/kembalikan','Kembalikan Barang']];
+  const routes=[['#/beranda','Beranda'],['#/daftar','Daftar Barang'],['#/lapor','Laporkan Barang'],['#/kembalikan','Kembalikan Barang'],['#/bantuan','Bantuan']];
   if(isAdmin) routes.push(['#/admin','⚙ Admin']);
   document.getElementById('nav').innerHTML=routes.map(r=>`<a class="${location.hash===r[0]||(!location.hash&&r[0]==='#/beranda')?'active':''}" onclick="nav('${r[0]}')">${r[1]}</a>`).join('');
   document.getElementById('userbox').innerHTML = me? `<span class="meta">👤 ${me.name}${isAdmin?' · Admin':''}</span><button class="btn outline" onclick="signOutUser()">Keluar</button>` : '';
@@ -175,6 +188,7 @@ function render(){
   if(h==='#/kembalikan') return renderKembalikan(app);
   if(h.startsWith('#/item/')) return renderItemDetail(app,h.split('/')[2]);
   if(h==='#/admin') return isAdmin?renderAdmin(app):renderBeranda(app);
+  if(h==='#/bantuan') return renderBantuan(app);
   renderBeranda(app);
 }
 
@@ -205,11 +219,14 @@ function applyFilter(){
 function renderItemDetail(app,id){
   const it=items.find(i=>i.id===id);
   if(!it){app.innerHTML='<div class="empty">Barang tidak ditemukan.</div>';return;}
+  const videoBtn = it.videoUrl ? `<a class="video-link" href="${it.videoUrl}" target="_blank" rel="noopener">🎥 Lihat video kondisi awal saat ditemukan</a>` : '<div class="meta" style="margin-top:6px">Tidak ada video penemuan dilampirkan.</div>';
   app.innerHTML=`<div class="item-detail">
     <img src="${(it.photos&&it.photos[0])||''}">
     <div>${statusBadge(it.status)}<h2>${it.name}</h2>
     <div class="meta">📍 ${it.location} · ${fmtDate(it.createdAt)} ${it.foundTime||''}</div>
+    <div class="meta">${it.brand?('Merek: '+it.brand+' · '):''}${it.color?('Warna: '+it.color+' · '):''}Kondisi: ${it.condition||'-'}</div>
     <p style="margin-top:8px">${it.description||''}</p>
+    ${videoBtn}
     <div class="meta" style="margin-top:8px">Dilaporkan oleh: ${it.reporterName||'-'}</div></div></div>
     <button class="btn outline" onclick="nav('#/daftar')">← Kembali</button>`;
 }
@@ -223,10 +240,19 @@ function renderLapor(app){
     <div class="thumbs" id="thumbs"></div>
     <label>Nama Barang</label><input type="text" id="f_name" required placeholder="Contoh: Dompet, Kunci">
     <label>Kategori</label><select id="f_cat" required><option value="">Pilih Kategori</option>${cat_opt.map(c=>`<option>${c}</option>`).join('')}</select>
+    <div class="spec-grid">
+      <div><label>Merek/Brand</label><input type="text" id="f_brand" placeholder="Contoh: Samsung, Eiger (opsional)"></div>
+      <div><label>Warna</label><input type="text" id="f_color" placeholder="Contoh: Hitam"></div>
+    </div>
+    <label>Kondisi Barang</label>
+    <select id="f_condition"><option>Baik</option><option>Rusak Ringan</option><option>Rusak Berat</option></select>
     <label>Lokasi Penemuan</label><input type="text" id="f_loc" required placeholder="Contoh: Gedung A3">
     <label>Tanggal & Waktu</label>
     <div style="display:flex;gap:8px"><input type="date" id="f_date" required><input type="time" id="f_time"></div>
-    <label>Deskripsi</label><textarea id="f_desc" placeholder="Warna, merek, ciri khusus..."></textarea>
+    <label>Deskripsi & Ciri Khusus</label><textarea id="f_desc" placeholder="Warna, merek, ciri khusus, nomor seri (jika ada)..."></textarea>
+    <label>Link Video Penemuan Barang (real-time)</label>
+    <input type="text" id="f_video" placeholder="Tempel link Google Drive/YouTube (unlisted)">
+    <div class="meta" style="margin-top:4px">📹 Rekam video singkat kondisi barang saat pertama ditemukan/diserahkan, upload ke Google Drive (atur akses "siapa saja yang punya link") atau YouTube (Unlisted), lalu tempel link-nya di sini. Ini melindungi kamu dan pemilik barang dari kesalahpahaman soal kondisi awal barang.</div>
     <label>Lokasi Penyimpanan</label>
     <div class="radio-row"><input type="radio" name="store" value="Simpan Sendiri" checked><span>Simpan Sendiri</span></div>
     <div class="radio-row"><input type="radio" name="store" value="Titipkan"><span>Titipkan ke Pos/Fakultas</span></div>
@@ -275,10 +301,14 @@ async function submitLapor(e){
     await dbf.collection('items').add({
       name:document.getElementById('f_name').value,
       category:document.getElementById('f_cat').value,
+      brand:document.getElementById('f_brand').value,
+      color:document.getElementById('f_color').value,
+      condition:document.getElementById('f_condition').value,
       location:document.getElementById('f_loc').value,
       foundDate:document.getElementById('f_date').value,
       foundTime:document.getElementById('f_time').value,
       description:document.getElementById('f_desc').value,
+      videoUrl:document.getElementById('f_video').value,
       storageMethod:document.querySelector('input[name=store]:checked').value,
       photos:pendingPhotos,
       reporterId: me.id,
@@ -328,6 +358,39 @@ async function submitKembalikan(e){
   }catch(err){ box.innerHTML='<div class="msg err">Gagal mengirim klaim: '+err.message+'</div>'; }
 }
 
+function renderBantuan(app){
+  const faqs=[
+    ['Bagaimana cara melaporkan barang yang saya temukan?','Klik menu "Laporkan Barang", isi detail barang, upload foto, dan tempel link video kondisi awal barang. Laporan akan langsung muncul di "Daftar Barang".'],
+    ['Bagaimana cara mengklaim barang saya yang hilang?','Buka menu "Kembalikan Barang", pilih barang yang sesuai dari daftar, lalu isi bukti kepemilikan sedetail mungkin agar mudah diverifikasi.'],
+    ['Apakah KETEMU bertanggung jawab jika barang rusak/hilang?','Tidak. KETEMU hanya fasilitator/perantara. Video kondisi awal barang saat diserahkan menjadi bukti utama untuk melindungi pelapor dan pemilik barang.'],
+    ['Video saya tidak mau ke-upload, harus bagaimana?','Upload videonya ke Google Drive atau YouTube (mode Unlisted) dari HP/laptop kamu dulu, lalu tempel link-nya ke form. Website ini tidak menyimpan file video secara langsung.']
+  ];
+  app.innerHTML=`<h2 style="color:var(--navy)">Pusat Bantuan</h2>
+  <div class="section-title">Pertanyaan Umum (FAQ)</div>
+  ${faqs.map(f=>`<div class="faq"><b>${f[0]}</b><div class="meta" style="margin-top:4px">${f[1]}</div></div>`).join('')}
+  <div class="section-title">Masih Butuh Bantuan?</div>
+  <form class="card" onsubmit="submitTicket(event)">
+    <label>Subjek</label><input type="text" id="h_subject" required placeholder="Contoh: Tidak bisa upload foto">
+    <label>Pesan</label><textarea id="h_msg" required placeholder="Jelaskan kendala kamu selengkap mungkin"></textarea>
+    <div id="hmsg"></div>
+    <button class="btn" type="submit" style="margin-top:14px">Kirim ke Admin</button>
+  </form>`;
+}
+async function submitTicket(e){
+  e.preventDefault();
+  const box=document.getElementById('hmsg');
+  try{
+    await dbf.collection('helpdesk').add({
+      subject:document.getElementById('h_subject').value,
+      message:document.getElementById('h_msg').value,
+      userId: me.id, userName: me.name, userEmail: me.email,
+      status:'open', createdAt:Date.now()
+    });
+    box.innerHTML='<div class="msg ok">Pertanyaan terkirim! Admin akan segera merespons.</div>';
+    document.getElementById('h_subject').value=''; document.getElementById('h_msg').value='';
+  }catch(err){ box.innerHTML='<div class="msg err">Gagal mengirim: '+err.message+'</div>'; }
+}
+
 function renderAdmin(app){
   const rows=[...items].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   app.innerHTML=`<h2 style="color:var(--navy)">Panel Admin</h2>
@@ -352,7 +415,19 @@ function renderAdmin(app){
           <div style="font-size:.85rem">${c.claimantDescription||''}</div>
         </div>`).join('')}`:''}
       </div></div>`;
-  }).join('')||'<div class="empty">Belum ada laporan.</div>'}`;
+  }).join('')||'<div class="empty">Belum ada laporan.</div>'}
+  <div class="section-title">Tiket Bantuan Masuk (${tickets.filter(t=>t.status==='open').length} belum ditangani)</div>
+  ${[...tickets].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).map(t=>`
+    <div class="ticket">
+      <span class="meta status-${t.status}">${t.status==='open'?'● Belum Ditangani':'✓ Selesai'}</span>
+      <div style="font-weight:600">${t.subject}</div>
+      <div class="meta">Dari: ${t.userName||'-'} (${t.userEmail||'-'}) · ${fmtDate(t.createdAt)}</div>
+      <div style="margin-top:6px">${t.message}</div>
+      ${t.status==='open'?`<button class="btn outline" style="margin-top:8px" onclick="adminResolveTicket('${t.id}')">Tandai Selesai</button>`:''}
+    </div>`).join('')||'<div class="empty">Belum ada tiket bantuan.</div>'}`;
+}
+async function adminResolveTicket(id){
+  try{ await dbf.collection('helpdesk').doc(id).update({status:'resolved'}); }catch(e){ alert('Gagal: '+e.message); }
 }
 async function adminSetStatus(id,status){
   try{ await dbf.collection('items').doc(id).update({status}); }catch(e){ alert('Gagal: '+e.message); }
